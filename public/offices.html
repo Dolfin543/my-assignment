@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Offices</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1 id="title">Lost-and-found offices</h1>
+        <p class="muted">Shopping malls, police stations and airports that keep found items and hand them back to their owners.</p>
+      </div>
+      <button id="add" class="hidden">+ Add office</button>
+    </div>
+    <div id="banner"></div>
+
+    <div class="card">
+      <div class="row">
+        <input type="search" id="q" placeholder="Office or town…" style="flex: 2; min-width: 180px; width: auto">
+        <select id="type" style="flex: 1; width: auto"><option value="">All types</option><option value="mall">🛍️ Shopping malls</option><option value="police">🚓 Police stations</option><option value="airport">✈️ Airports</option></select>
+        <select id="province" style="flex: 1; width: auto"></select>
+      </div>
+    </div>
+    <div class="board" id="list"></div>
+
+    <section id="manage" class="hidden" style="margin-top: 28px">
+      <h2 id="manage-title">Office admins</h2>
+      <div class="card">
+        <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username / email</th><th>Added</th><th></th></tr></thead><tbody id="admins"></tbody></table></div>
+        <h3 style="margin-top: 16px">Add an admin</h3>
+        <div class="tabs" style="margin-top: 8px"><button class="active" data-mode="existing">Existing account</button><button data-mode="new">New account</button></div>
+        <form id="admin-existing" class="row" style="align-items: flex-end">
+          <div style="flex: 1; min-width: 220px"><label for="ae-login">Username or email</label><input type="text" id="ae-login" required></div>
+          <button type="submit">Add as admin</button>
+        </form>
+        <form id="admin-new" class="hidden">
+          <div class="grid-3">
+            <div><label for="an-first">First name</label><input type="text" id="an-first" required></div>
+            <div><label for="an-last">Last name</label><input type="text" id="an-last" required></div>
+            <div><label for="an-email">Email</label><input type="email" id="an-email" required></div>
+          </div>
+          <button type="submit" style="margin-top: 12px">Create admin account</button>
+        </form>
+        <p class="error" id="admin-error"></p>
+        <div id="temp"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="dialog">
+    <form id="form" method="dialog">
+      <h2 id="dialog-title">Add office</h2>
+      <div class="grid-2">
+        <div><label for="f-name">Name</label><input type="text" id="f-name" required maxlength="120"></div>
+        <div><label for="f-type">Type</label><select id="f-type" required><option value="mall">🛍️ Shopping mall</option><option value="police">🚓 Police station</option><option value="airport">✈️ Airport</option></select></div>
+      </div>
+      <div class="grid-2">
+        <div><label for="f-email">Email</label><input type="email" id="f-email" required></div>
+        <div><label for="f-phone">Phone</label><input type="tel" id="f-phone" required maxlength="20"></div>
+      </div>
+      <label for="f-hours">Opening hours</label><input type="text" id="f-hours" maxlength="120" placeholder="e.g. Mon–Fri 08:00–16:00">
+      <div id="sub-mall"><label for="f-desk">Desk location in the mall</label><input type="text" id="f-desk" maxlength="120" placeholder="e.g. Customer care, ground floor"></div>
+      <div id="sub-police" class="hidden"><label for="f-precinct">Precinct</label><input type="text" id="f-precinct" maxlength="80"></div>
+      <div id="sub-airport" class="hidden grid-2">
+        <div><label for="f-iata">Airport code (3 letters)</label><input type="text" id="f-iata" maxlength="3" style="text-transform: uppercase"></div>
+        <div><label for="f-terminal">Terminal</label><input type="text" id="f-terminal" maxlength="40"></div>
+      </div>
+      <fieldset><legend>Address</legend>
+        <div class="grid-2">
+          <div><label for="f-number">Street number</label><input type="text" id="f-number" required maxlength="10"></div>
+          <div><label for="f-street">Street name</label><input type="text" id="f-street" required maxlength="100"></div>
+        </div>
+        <label for="f-suburb">Suburb</label><input type="text" id="f-suburb" maxlength="80">
+        <div class="grid-2">
+          <div><label for="f-province">Province</label><select id="f-province" required></select></div>
+          <div><label for="f-city">City</label><select id="f-city" required></select></div>
+        </div>
+      </fieldset>
+      <label class="inline" style="margin-top: 12px" id="f-active-box"><input type="checkbox" id="f-active" checked> Active (shown to members)</label>
+      <p class="error" id="f-error"></p>
+      <div class="actions">
+        <button type="button" class="danger" id="f-delete" style="margin-right: auto">Delete</button>
+        <button type="button" class="secondary" id="f-cancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/common.js"></script>
+  <script>
+    let user; let offices = []; let editing = null; let picker; let managed = null;
+
+    function officeTag(o) {
+      const sub = o.lfo_type === 'mall' ? o.desk_location : o.lfo_type === 'police' ? `Precinct: ${o.precinct}` : `${o.iata_code}${o.terminal ? ` · Terminal ${o.terminal}` : ''}`;
+      const canEdit = user.role === 'system_admin' || (user.role === 'office_admin' && o.id === user.officeId);
+      return `<div class="tag-card ${o.lfo_type === 'police' ? 'lost' : 'found'}" style="cursor: default">
+        <div class="tag-top"><span class="tag-kind" style="background: var(--ink)">${OFFICE_ICON[o.lfo_type]} ${esc(OFFICE_TYPE[o.lfo_type])}</span><span class="tag-ref">${esc(o.office_code)}</span></div>
+        <h3>${esc(o.name)}</h3>
+        <p class="tag-meta">📍 ${esc(o.address)}, ${esc(o.province)}</p>
+        <p class="tag-meta">ℹ️ ${esc(sub)}</p>
+        <p class="tag-meta">📞 ${esc(o.phone)} · ✉ ${esc(o.email)}</p>
+        ${o.hours ? `<p class="tag-meta">🕘 ${esc(o.hours)}</p>` : ''}
+        <div class="row" style="margin-top: 10px">
+          <a class="button small secondary" href="browse.html?type=found&officeId=${o.id}">${num(o.items_held)} item${o.items_held === 1 ? '' : 's'} held</a>
+          ${o.is_active ? '' : '<span class="pill s-closed">Inactive</span>'}
+          ${canEdit ? `<button class="small secondary" data-edit="${o.id}">Edit</button>` : ''}
+          ${user.role === 'system_admin' ? `<button class="small secondary" data-admins="${o.id}">Admins (${o.admin_count})</button>` : ''}
+        </div>
+      </div>`;
+    }
+
+    async function load() {
+      const p = new URLSearchParams();
+      if (document.getElementById('q').value.trim()) p.set('q', document.getElementById('q').value.trim());
+      if (document.getElementById('type').value) p.set('type', document.getElementById('type').value);
+      if (document.getElementById('province').value) p.set('provinceId', document.getElementById('province').value);
+      offices = await api(`/api/offices?${p}`);
+      document.getElementById('list').innerHTML = offices.length ? offices.map(officeTag).join('') : '<div class="board-empty" style="grid-column: 1 / -1">No offices match.</div>';
+      document.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => openForm(offices.find((o) => o.id === Number(b.dataset.edit))); });
+      document.querySelectorAll('[data-admins]').forEach((b) => { b.onclick = () => showAdmins(Number(b.dataset.admins)); });
+    }
+
+    async function showAdmins(officeId) {
+      managed = await api(`/api/offices/${officeId}`);
+      document.getElementById('manage').classList.remove('hidden');
+      document.getElementById('manage-title').textContent = `Admins of ${managed.name}`;
+      document.getElementById('admins').innerHTML = managed.admins.length ? managed.admins.map((a) => `<tr>
+        <td>${esc(a.first_name)} ${esc(a.last_name)}${a.person_id === user.id ? ' <span class="small muted">(you)</span>' : ''}</td>
+        <td class="small">@${esc(a.username)}<br>${esc(a.email)}</td>
+        <td class="small">${formatDay(a.created_at)}${a.added_by_name ? `<br><span class="muted">by ${esc(a.added_by_name)}</span>` : ''}</td>
+        <td>${a.person_id === user.id ? '' : `<button class="link" style="color: var(--bad)" data-remove="${a.person_id}">Remove</button>`}</td></tr>`).join('')
+        : '<tr><td colspan="4" class="empty">No admins yet.</td></tr>';
+      document.querySelectorAll('[data-remove]').forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm('Remove this admin? They keep their account as an ordinary member.')) return;
+          try { await api(`/api/offices/${managed.id}/admins/${b.dataset.remove}`, { method: 'DELETE' }); flash('Admin removed.'); showAdmins(managed.id); load(); } catch (err) { alert(err.message); }
+        };
+      });
+      if (user.role === 'system_admin') document.getElementById('manage').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    document.querySelectorAll('#manage .tabs button').forEach((b) => {
+      b.onclick = (e) => {
+        e.preventDefault();
+        document.querySelectorAll('#manage .tabs button').forEach((x) => x.classList.toggle('active', x === b));
+        document.getElementById('admin-existing').classList.toggle('hidden', b.dataset.mode !== 'existing');
+        document.getElementById('admin-new').classList.toggle('hidden', b.dataset.mode !== 'new');
+      };
+    });
+    async function addAdmin(body) {
+      document.getElementById('admin-error').textContent = '';
+      document.getElementById('temp').innerHTML = '';
+      try {
+        const r = await api(`/api/offices/${managed.id}/admins`, { method: 'POST', body });
+        if (r.tempPassword) document.getElementById('temp').innerHTML = tempPasswordNotice(r.name, r.username, r.tempPassword);
+        else flash(`${r.name} is now an admin of ${managed.name}.`);
+        document.getElementById('admin-existing').reset();
+        document.getElementById('admin-new').reset();
+        showAdmins(managed.id);
+        load();
+      } catch (err) { document.getElementById('admin-error').textContent = err.message; }
+    }
+    document.getElementById('admin-existing').onsubmit = (e) => { e.preventDefault(); addAdmin({ login: document.getElementById('ae-login').value }); };
+    document.getElementById('admin-new').onsubmit = (e) => {
+      e.preventDefault();
+      addAdmin({ firstName: document.getElementById('an-first').value, lastName: document.getElementById('an-last').value, email: document.getElementById('an-email').value });
+    };
+
+    function showSubtype() {
+      const t = document.getElementById('f-type').value;
+      for (const k of ['mall', 'police', 'airport']) document.getElementById(`sub-${k}`).classList.toggle('hidden', k !== t);
+    }
+    document.getElementById('f-type').onchange = showSubtype;
+
+    function openForm(o) {
+      editing = o || null;
+      const sys = user.role === 'system_admin';
+      const v = (elId, value) => { document.getElementById(elId).value = value ?? ''; };
+      document.getElementById('dialog-title').textContent = o ? `Edit ${o.name}` : 'Add office';
+      v('f-name', o?.name); v('f-type', o?.lfo_type || 'mall'); v('f-email', o?.email); v('f-phone', o?.phone); v('f-hours', o?.hours);
+      v('f-desk', o?.desk_location); v('f-precinct', o?.precinct); v('f-iata', o?.iata_code); v('f-terminal', o?.terminal);
+      v('f-number', o?.street_number); v('f-street', o?.street_name); v('f-suburb', o?.suburb);
+      picker.set(o ? o.city_id : null);
+      document.getElementById('f-active').checked = o ? !!o.is_active : true;
+      document.getElementById('f-name').disabled = !sys;
+      document.getElementById('f-type').disabled = !sys;
+      document.getElementById('f-active-box').classList.toggle('hidden', !sys);
+      document.getElementById('f-delete').classList.toggle('hidden', !o || !sys);
+      document.getElementById('f-error').textContent = '';
+      showSubtype();
+      document.getElementById('dialog').showModal();
+    }
+    document.getElementById('f-cancel').onclick = () => document.getElementById('dialog').close();
+    document.getElementById('f-delete').onclick = async () => {
+      if (!confirm(`Delete ${editing.name}?`)) return;
+      try {
+        await api(`/api/offices/${editing.id}`, { method: 'DELETE' });
+        document.getElementById('dialog').close();
+        flash('Office deleted.');
+        load();
+      } catch (err) { document.getElementById('f-error').textContent = err.message; }
+    };
+    document.getElementById('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const v = (elId) => document.getElementById(elId).value;
+      const body = {
+        name: v('f-name'), lfoType: v('f-type'), email: v('f-email'), phone: v('f-phone'), hours: v('f-hours'),
+        deskLocation: v('f-desk'), precinct: v('f-precinct'), iataCode: v('f-iata'), terminal: v('f-terminal'),
+        streetNumber: v('f-number'), streetName: v('f-street'), suburb: v('f-suburb'), cityId: v('f-city'), isActive: document.getElementById('f-active').checked,
+      };
+      try {
+        if (editing) await api(`/api/offices/${editing.id}`, { method: 'PUT', body });
+        else await api('/api/offices', { method: 'POST', body });
+        document.getElementById('dialog').close();
+        flash(editing ? 'Office updated.' : 'Office added.');
+        load();
+      } catch (err) { document.getElementById('f-error').textContent = err.message; }
+    };
+
+    (async () => {
+      user = await requireUser();
+      if (user.role === 'office_admin') document.getElementById('title').textContent = 'Offices';
+      const provinces = await api('/api/provinces');
+      document.getElementById('province').innerHTML = optionsHtml(provinces, null, 'All provinces');
+      picker = await cityPicker(document.getElementById('f-province'), document.getElementById('f-city'));
+      if (user.role === 'system_admin') {
+        document.getElementById('add').classList.remove('hidden');
+        document.getElementById('add').onclick = () => openForm(null);
+      }
+      ['type', 'province'].forEach((elId) => { document.getElementById(elId).onchange = load; });
+      let t;
+      document.getElementById('q').oninput = () => { clearTimeout(t); t = setTimeout(load, 300); };
+      await load();
+      if (user.role === 'office_admin') showAdmins(user.officeId);
+    })();
+  </script>
+</body>
+</html>

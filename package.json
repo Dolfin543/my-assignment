@@ -1,0 +1,37 @@
+{
+  "name": "lost-and-found",
+  "version": "1.0.0",
+  "description": "Lost and Found Activities App: report lost and found items, match them, claim and verify ownership through lost-and-found offices (malls, police stations, airports). Node.js + Express + MySQL.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "db:setup": "node db/setup.js",
+    "db:reset": "node db/setup.js --reset",
+    "db:check": "node tools/compare-schema.js && node tools/test-constraints.js",
+    "db:inspect": "node tools/inspect-db.js",
+    "admin:create": "node tools/create-admin.js",
+    "admin:reset-password": "node tools/reset-password.js",
+    "test:api": "node tools/test-api.js",
+    "test:ui": "node tools/test-ui.js",
+    "test:load": "node tools/test-load.js",
+    "test": "node tools/compare-schema.js && node tools/test-constraints.js && node tools/test-api.js && node tools/test-ui.js && node tools/test-load.js",
+    "sample:seed": "node tools/sample-data.js seed",
+    "sample:clean": "node tools/sample-data.js clean",
+    "docs:screenshots": "node tools/screenshots.js",
+    "docs:manual": "node docs/build/build-manual.js && powershell -NoProfile -ExecutionPolicy Bypass -File docs/build/word-finalise.ps1 -Docx docs/Lost-and-Found-User-Manual.docx"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "mysql2": "^3.24.4"
+  },
+  "devDependencies": {
+    "docx": "^9.7.2",
+    "elkjs": "^0.12.0",
+    "puppeteer-core": "^25.12.0"
+  }
+}

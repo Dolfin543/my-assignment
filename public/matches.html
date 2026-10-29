@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Matches</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Matches</h1>
+        <p class="muted" id="intro">The system compares every lost report with the found items (same category, province, dates close together, shared words). Check each suggestion and confirm the real ones.</p>
+      </div>
+      <div class="toggle" id="status-toggle">
+        <button data-status="suggested" class="on">To review</button>
+        <button data-status="confirmed">Confirmed</button>
+        <button data-status="rejected">Rejected</button>
+      </div>
+    </div>
+    <div id="banner"></div>
+    <div id="list"></div>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script>
+    let status = 'suggested';
+    let user;
+    const side = (kind, ref, id, name, desc, colour, brand, date, city, extra) => `
+      <div style="flex: 1; min-width: 220px">
+        <div class="row">${kindPill(kind)} <a class="small" href="item.html?id=${id}">${esc(ref)}</a></div>
+        <div class="item-title">${esc(name)}</div>
+        <div class="meta">${kind === 'lost' ? 'Lost' : 'Found'} ${formatDay(date)} · ${esc(city)}${extra ? ` · ${esc(extra)}` : ''}</div>
+        <p class="small" style="margin: 6px 0 0">${esc(desc || '')}</p>
+        <p class="small muted" style="margin: 2px 0 0">${[colour, brand].filter(Boolean).map(esc).join(' · ')}</p>
+      </div>`;
+
+    async function load() {
+      const rows = await api(`/api/matches?status=${status}${status === 'suggested' ? '&active=1' : ''}`);
+      document.getElementById('list').innerHTML = rows.length ? rows.map((m) => `
+        <div class="card">
+          <div class="spread"><div class="row">${matchPill(m.match_status)} <span class="pill">${esc(m.category)}</span> <strong>Score ${m.score}</strong>
+            ${m.decided_by_name ? `<span class="small muted">· ${esc(m.decided_by_name)}, ${formatDate(m.decided_at)}</span>` : ''}</div>
+            ${m.match_status === 'suggested' && (user.role === 'system_admin' || m.lfo_id === user.officeId)
+    ? `<div class="row"><button class="small found" data-confirm="${m.id}">Confirm match</button><button class="small secondary" data-reject="${m.id}">Not a match</button></div>` : ''}</div>
+          <div class="row" style="align-items: flex-start; gap: 18px; margin-top: 10px">
+            ${side('lost', m.lost_ref, m.lost_item_id, m.lost_name, m.lost_description, m.lost_colour, m.lost_brand, m.date_lost, m.lost_city, m.owner_name)}
+            <div style="font-size: 26px; align-self: center">↔</div>
+            ${side('found', m.found_ref, m.found_item_id, m.found_name, m.found_description, m.found_colour, m.found_brand, m.found_date, m.found_city, m.office_name)}
+          </div>
+        </div>`).join('') : `<div class="card empty">${status === 'suggested' ? 'Nothing to review. 👍' : 'None.'}</div>`;
+      const decide = (attr, decision, message) => document.querySelectorAll(`[data-${attr}]`).forEach((b) => {
+        b.onclick = async () => {
+          try {
+            await api(`/api/matches/${b.dataset[attr]}`, { method: 'PUT', body: { decision } });
+            flash(message);
+            load();
+          } catch (err) { alert(err.message); }
+        };
+      });
+      decide('confirm', 'confirm', 'Match confirmed. The owner can now see where the item is and claim it.');
+      decide('reject', 'reject', 'Suggestion rejected.');
+    }
+
+    (async () => {
+      user = await requireUser('office_admin', 'system_admin');
+      document.querySelectorAll('#status-toggle button').forEach((b) => {
+        b.onclick = () => { status = b.dataset.status; document.querySelectorAll('#status-toggle button').forEach((x) => x.classList.toggle('on', x === b)); load(); };
+      });
+      await load();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Administration</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <div class="page-head"><div><h1>Administration</h1><p class="muted">People, locations, item categories and claim statuses.</p></div></div>
+    <div id="banner"></div>
+    <div class="tabs" id="tabs">
+      <button data-tab="people" class="active">People</button>
+      <button data-tab="locations">Provinces &amp; cities</button>
+      <button data-tab="categories">Categories</button>
+      <button data-tab="statuses">Claim statuses</button>
+      <button data-tab="activity">Activity log</button>
+    </div>
+
+    <section id="tab-people">
+      <div class="card">
+        <h2 style="margin-top: 0">Create an account</h2>
+        <form id="person-form">
+          <div class="grid-3">
+            <div><label for="p-first">First name</label><input type="text" id="p-first" required maxlength="60"></div>
+            <div><label for="p-last">Last name</label><input type="text" id="p-last" required maxlength="60"></div>
+            <div><label for="p-email">Email</label><input type="email" id="p-email" required></div>
+          </div>
+          <div class="grid-3">
+            <div><label for="p-role">Role</label><select id="p-role"><option value="office_admin">Office admin</option><option value="system_admin">System admin</option><option value="member">Member</option></select></div>
+            <div id="p-office-box"><label for="p-office">Office</label><select id="p-office"></select></div>
+            <div style="padding-top: 34px"><button type="submit">Create account</button></div>
+          </div>
+          <p class="error" id="p-error"></p>
+        </form>
+        <div id="temp"></div>
+      </div>
+      <div class="card"><div class="row">
+        <input type="search" id="p-search" placeholder="Name, username or email…" style="flex: 2; min-width: 200px; width: auto">
+        <select id="p-filter" style="flex: 1; width: auto"><option value="">All roles</option><option value="member">Members</option><option value="office_admin">Office admins</option><option value="system_admin">System admins</option></select>
+      </div></div>
+      <div class="card table-wrap"><table>
+        <thead><tr><th>Name</th><th>Username / email</th><th>Role / office</th><th>Active</th><th class="num">Reports</th><th class="num">Rejected claims</th><th></th></tr></thead>
+        <tbody id="people"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-locations" class="hidden">
+      <div class="two-col">
+        <div class="card"><h2 style="margin-top: 0">Provinces</h2>
+          <form id="prov-form" class="row"><input type="text" id="prov-name" placeholder="New province" required style="flex: 1; width: auto"><button type="submit">Add</button></form>
+          <div class="table-wrap"><table><tbody id="provinces"></tbody></table></div></div>
+        <div class="card"><h2 style="margin-top: 0">Cities</h2>
+          <form id="city-form" class="row" style="align-items: flex-end">
+            <select id="city-prov" style="flex: 1; width: auto"></select>
+            <input type="text" id="city-name" placeholder="City / town" required style="flex: 1; width: auto">
+            <input type="text" id="city-code" placeholder="Postal code" required maxlength="4" style="width: 110px">
+            <button type="submit">Add</button>
+          </form>
+          <div class="table-wrap"><table><thead><tr><th>City</th><th>Province</th><th>Postal code</th><th></th></tr></thead><tbody id="cities"></tbody></table></div></div>
+      </div>
+      <p class="error" id="loc-error"></p>
+    </section>
+
+    <section id="tab-categories" class="hidden">
+      <div class="card">
+        <form id="cat-form" class="row"><input type="text" id="cat-name" placeholder="New category" required style="flex: 1; width: auto"><input type="text" id="cat-desc" placeholder="Description" style="flex: 2; width: auto"><button type="submit">Add</button></form>
+        <p class="error" id="cat-error"></p>
+        <div class="table-wrap"><table><thead><tr><th>Category</th><th>Description</th><th>Active</th><th></th></tr></thead><tbody id="categories"></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="tab-statuses" class="hidden">
+      <div class="card">
+        <p class="muted">The claim workflow uses these statuses; their names can be changed.</p>
+        <div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Ends the claim</th><th></th></tr></thead><tbody id="statuses"></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="tab-activity" class="hidden">
+      <div class="card"><ul class="timeline" id="activity"></ul></div>
+    </section>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script>
+    let me; let offices = [];
+    const fail = (elId) => (err) => { document.getElementById(elId).textContent = err.message; };
+
+    async function loadPeople() {
+      const p = new URLSearchParams();
+      if (document.getElementById('p-search').value.trim()) p.set('search', document.getElementById('p-search').value.trim());
+      if (document.getElementById('p-filter').value) p.set('role', document.getElementById('p-filter').value);
+      const people = await api(`/api/admin/persons?${p}`);
+      document.getElementById('people').innerHTML = people.map((u) => {
+        const self = u.id === me.id;
+        return `<tr>
+          <td>${esc(u.first_name)} ${esc(u.last_name)}${u.must_change_password ? '<div class="small muted">temporary password</div>' : ''}</td>
+          <td class="small">@${esc(u.username)}<br>${esc(u.email)}</td>
+          <td>${self ? `<span class="pill r-${u.role}">${ROLE_LABEL[u.role]}</span>` : `<select data-role="${u.id}">${['member', 'office_admin', 'system_admin'].map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}</select>
+            ${u.role === 'office_admin' ? `<select data-office="${u.id}" style="margin-top: 4px">${optionsHtml(offices, u.office_id, null)}</select>` : ''}`}</td>
+          <td>${self ? 'Yes' : `<label class="inline"><input type="checkbox" data-active="${u.id}" ${u.is_active ? 'checked' : ''}> ${u.is_active ? 'Yes' : 'No'}</label>`}</td>
+          <td class="num">${u.reports}</td>
+          <td class="num">${u.rejected_claims ? `<span class="pill ${u.rejected_claims >= 2 ? 'warn' : ''}">${u.rejected_claims}</span>` : '0'}</td>
+          <td>${self ? '<span class="small muted">you</span>' : `<button class="small secondary" data-reset="${u.id}">Reset password</button> <button class="link" style="color: var(--bad)" data-delete="${u.id}">Delete</button>`}</td></tr>`;
+      }).join('') || '<tr><td colspan="7" class="empty">Nobody matches.</td></tr>';
+      const patch = async (uid, body) => {
+        try { await api(`/api/admin/persons/${uid}`, { method: 'PATCH', body }); flash('Account updated.'); } catch (err) { alert(err.message); }
+        loadPeople();
+      };
+      document.querySelectorAll('[data-role]').forEach((s) => {
+        s.onchange = () => patch(s.dataset.role, s.value === 'office_admin' ? { role: s.value, officeId: offices[0]?.id } : { role: s.value });
+      });
+      document.querySelectorAll('[data-office]').forEach((s) => { s.onchange = () => patch(s.dataset.office, { role: 'office_admin', officeId: s.value }); });
+      document.querySelectorAll('[data-active]').forEach((c) => { c.onchange = () => patch(c.dataset.active, { isActive: c.checked }); });
+      document.querySelectorAll('[data-reset]').forEach((b) => {
+        b.onclick = async () => {
+          const u = people.find((x) => x.id === Number(b.dataset.reset));
+          if (!confirm(`Give ${u.first_name} ${u.last_name} a new temporary password?`)) return;
+          const { tempPassword } = await api(`/api/admin/persons/${u.id}/reset-password`, { method: 'POST' });
+          document.getElementById('temp').innerHTML = tempPasswordNotice(`${u.first_name} ${u.last_name}`, u.username, tempPassword);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          loadPeople();
+        };
+      });
+      document.querySelectorAll('[data-delete]').forEach((b) => {
+        b.onclick = async () => {
+          const u = people.find((x) => x.id === Number(b.dataset.delete));
+          if (!confirm(`Delete the account of ${u.first_name} ${u.last_name}? Their reports and claims stay without their name. Deactivating is usually better.`)) return;
+          try { await api(`/api/admin/persons/${u.id}`, { method: 'DELETE' }); flash('Account deleted.'); } catch (err) { alert(err.message); }
+          loadPeople();
+        };
+      });
+    }
+
+    document.getElementById('p-role').onchange = (e) => document.getElementById('p-office-box').classList.toggle('hidden', e.target.value !== 'office_admin');
+    document.getElementById('person-form').onsubmit = async (e) => {
+      e.preventDefault();
+      document.getElementById('p-error').textContent = '';
+      const v = (elId) => document.getElementById(elId).value;
+      try {
+        const r = await api('/api/admin/persons', { method: 'POST', body: { firstName: v('p-first'), lastName: v('p-last'), email: v('p-email'), role: v('p-role'), officeId: v('p-office') } });
+        document.getElementById('temp').innerHTML = tempPasswordNotice(`${v('p-first')} ${v('p-last')}`, r.username, r.tempPassword);
+        e.target.reset();
+        document.getElementById('p-office-box').classList.remove('hidden');
+        loadPeople();
+      } catch (err) { document.getElementById('p-error').textContent = err.message; }
+    };
+
+    async function loadLocations() {
+      const [provinces, cities] = await Promise.all([api('/api/provinces'), api('/api/cities')]);
+      document.getElementById('city-prov').innerHTML = optionsHtml(provinces, null, 'Province…');
+      document.getElementById('provinces').innerHTML = provinces.map((p) => `<tr><td>${esc(p.name)}</td><td class="num small muted">${p.city_count} cities</td>
+        <td><button class="link" data-rename-prov="${p.id}">Rename</button> <button class="link" style="color: var(--bad)" data-del-prov="${p.id}">Delete</button></td></tr>`).join('');
+      document.getElementById('cities').innerHTML = cities.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.province)}</td><td>${esc(c.postal_code)}</td>
+        <td><button class="link" data-edit-city="${c.id}">Edit</button> <button class="link" style="color: var(--bad)" data-del-city="${c.id}">Delete</button></td></tr>`).join('');
+      const err = fail('loc-error');
+      document.querySelectorAll('[data-rename-prov]').forEach((b) => {
+        b.onclick = async () => {
+          const p = provinces.find((x) => x.id === Number(b.dataset.renameProv));
+          const name = prompt('Province name', p.name);
+          if (name) await api(`/api/admin/provinces/${p.id}`, { method: 'PUT', body: { name } }).then(loadLocations, err);
+        };
+      });
+      document.querySelectorAll('[data-del-prov]').forEach((b) => {
+        b.onclick = () => confirm('Delete this province?') && api(`/api/admin/provinces/${b.dataset.delProv}`, { method: 'DELETE' }).then(loadLocations, err);
+      });
+      document.querySelectorAll('[data-edit-city]').forEach((b) => {
+        b.onclick = async () => {
+          const c = cities.find((x) => x.id === Number(b.dataset.editCity));
+          const name = prompt('City name', c.name);
+          if (!name) return;
+          const postalCode = prompt('Postal code', c.postal_code);
+          if (postalCode) await api(`/api/admin/cities/${c.id}`, { method: 'PUT', body: { name, postalCode, provinceId: c.province_id } }).then(loadLocations, err);
+        };
+      });
+      document.querySelectorAll('[data-del-city]').forEach((b) => {
+        b.onclick = () => confirm('Delete this city?') && api(`/api/admin/cities/${b.dataset.delCity}`, { method: 'DELETE' }).then(loadLocations, err);
+      });
+    }
+    document.getElementById('prov-form').onsubmit = (e) => {
+      e.preventDefault();
+      api('/api/admin/provinces', { method: 'POST', body: { name: document.getElementById('prov-name').value } }).then(() => { e.target.reset(); loadLocations(); }, fail('loc-error'));
+    };
+    document.getElementById('city-form').onsubmit = (e) => {
+      e.preventDefault();
+      const v = (elId) => document.getElementById(elId).value;
+      api('/api/admin/cities', { method: 'POST', body: { provinceId: v('city-prov'), name: v('city-name'), postalCode: v('city-code') } }).then(() => { e.target.reset(); loadLocations(); }, fail('loc-error'));
+    };
+
+    async function loadCategories() {
+      const cats = await api('/api/categories?all=1');
+      document.getElementById('categories').innerHTML = cats.map((c) => `<tr><td>${catIcon(c.name)} ${esc(c.name)}</td><td class="small">${esc(c.description || '')}</td>
+        <td><label class="inline"><input type="checkbox" data-cat-active="${c.id}" ${c.is_active ? 'checked' : ''}> ${c.is_active ? 'Yes' : 'No'}</label></td>
+        <td><button class="link" style="color: var(--bad)" data-del-cat="${c.id}">Delete</button></td></tr>`).join('');
+      document.querySelectorAll('[data-cat-active]').forEach((cb) => {
+        cb.onchange = () => {
+          const c = cats.find((x) => x.id === Number(cb.dataset.catActive));
+          api(`/api/admin/categories/${c.id}`, { method: 'PUT', body: { name: c.name, description: c.description, isActive: cb.checked } }).then(loadCategories, fail('cat-error'));
+        };
+      });
+      document.querySelectorAll('[data-del-cat]').forEach((b) => {
+        b.onclick = () => confirm('Delete this category?') && api(`/api/admin/categories/${b.dataset.delCat}`, { method: 'DELETE' }).then(loadCategories, fail('cat-error'));
+      });
+    }
+    document.getElementById('cat-form').onsubmit = (e) => {
+      e.preventDefault();
+      api('/api/admin/categories', { method: 'POST', body: { name: document.getElementById('cat-name').value, description: document.getElementById('cat-desc').value } })
+        .then(() => { e.target.reset(); loadCategories(); }, fail('cat-error'));
+    };
+
+    async function loadStatuses() {
+      const statuses = await api('/api/claim-statuses');
+      document.getElementById('statuses').innerHTML = statuses.map((s) => `<tr><td><code>${esc(s.code)}</code></td><td>${claimPill(s.code, s.name)}</td><td>${s.is_final ? 'Yes' : 'No'}</td>
+        <td><button class="link" data-rename-status="${s.id}">Rename</button></td></tr>`).join('');
+      document.querySelectorAll('[data-rename-status]').forEach((b) => {
+        b.onclick = async () => {
+          const s = statuses.find((x) => x.id === Number(b.dataset.renameStatus));
+          const name = prompt('Status name', s.name);
+          if (name) await api(`/api/admin/claim-statuses/${s.id}`, { method: 'PUT', body: { name } }).then(loadStatuses, (err) => alert(err.message));
+        };
+      });
+    }
+
+    async function loadActivity() {
+      const rows = await api('/api/admin/activity');
+      document.getElementById('activity').innerHTML = rows.map((a) => `<li><div class="when">${formatDate(a.created_at)}${a.person ? ` · ${esc(a.person)}` : ''}</div>
+        <div><strong>${esc(a.action.replace(/_/g, ' '))}</strong>${a.details ? ` – ${esc(a.details)}` : ''}
+        ${a.item_id ? ` · <a href="item.html?id=${a.item_id}">item</a>` : ''}${a.claim_id ? ` · <a href="claim.html?id=${a.claim_id}">claim</a>` : ''}</div></li>`).join('') || '<li>Nothing yet.</li>';
+    }
+
+    const LOADERS = { people: loadPeople, locations: loadLocations, categories: loadCategories, statuses: loadStatuses, activity: loadActivity };
+    document.querySelectorAll('#tabs button').forEach((b) => {
+      b.onclick = () => {
+        document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('active', x === b));
+        for (const k of Object.keys(LOADERS)) document.getElementById(`tab-${k}`).classList.toggle('hidden', k !== b.dataset.tab);
+        LOADERS[b.dataset.tab]();
+      };
+    });
+
+    (async () => {
+      me = await requireUser('system_admin');
+      offices = await api('/api/offices');
+      document.getElementById('p-office').innerHTML = optionsHtml(offices, null, 'Choose…');
+      let t;
+      document.getElementById('p-search').oninput = () => { clearTimeout(t); t = setTimeout(loadPeople, 300); };
+      document.getElementById('p-filter').onchange = loadPeople;
+      await loadPeople();
+    })();
+  </script>
+</body>
+</html>

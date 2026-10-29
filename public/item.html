@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Item</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <p><a href="javascript:history.back()">← Back</a></p>
+    <div id="banner"></div>
+    <div id="page"><div class="card empty">Loading…</div></div>
+  </main>
+
+  <dialog id="claim-dialog">
+    <form id="claim-form" method="dialog">
+      <h2>This is mine</h2>
+      <p class="muted">Describe details that only the owner would know: what is inside, marks, serial numbers, the lock screen, an engraving… The office compares them with what they see on the item. False claims are recorded.</p>
+      <label for="c-proof">How can you prove it is yours?</label>
+      <textarea id="c-proof" required minlength="20" maxlength="2000"></textarea>
+      <div id="c-lost-box">
+        <label for="c-lost">Your lost-item report <span class="muted small">(optional)</span></label>
+        <select id="c-lost"></select>
+      </div>
+      <p class="error" id="c-error"></p>
+      <div class="actions"><button type="button" class="secondary" id="c-cancel">Cancel</button><button type="submit" class="found">Send claim</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="close-dialog">
+    <form id="close-form" method="dialog">
+      <h2 id="close-title">Close this report</h2>
+      <p class="muted" id="close-help"></p>
+      <label for="close-reason">Reason</label>
+      <textarea id="close-reason" required minlength="5" maxlength="300" style="min-height: 70px"></textarea>
+      <p class="error" id="close-error"></p>
+      <div class="actions"><button type="button" class="secondary" id="close-cancel">Cancel</button><button type="submit" class="danger">Close report</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="receive-dialog">
+    <form id="receive-form" method="dialog">
+      <h2>Item handed in</h2>
+      <p class="muted">Confirm that the office now has this item, and where it is kept.</p>
+      <label for="r-storage">Storage location</label>
+      <input type="text" id="r-storage" maxlength="100" placeholder="e.g. Shelf B2, bag 14">
+      <p class="error" id="r-error"></p>
+      <div class="actions"><button type="button" class="secondary" id="r-cancel">Cancel</button><button type="submit" class="found">Mark received</button></div>
+    </form>
+  </dialog>
+
+  <script src="js/common.js"></script>
+  <script>
+    const id = param('id');
+    let user; let item;
+
+    function steps(i) {
+      const flow = i.item_type === 'found'
+        ? [['reported', 'Reported'], ['received', 'At the office'], ['matched', 'Matched'], ['claimed', 'Claim approved'], ['returned', 'Returned']]
+        : [['reported', 'Reported'], ['matched', 'Match found'], ['claimed', 'Claim approved'], ['returned', 'Returned']];
+      if (i.status === 'closed') return '<div class="steps"><span class="current">Closed</span></div>';
+      const reached = new Set(['reported']);
+      if (i.received_at) reached.add('received');
+      const order = ['open', 'matched', 'claimed', 'returned'];
+      const at = order.indexOf(i.status);
+      if (at >= 1) reached.add('matched');
+      if (at >= 2) { reached.add('claimed'); reached.add('received'); }
+      if (at >= 3) reached.add('returned');
+      const last = flow.filter(([k]) => reached.has(k)).pop()[0];
+      return `<div class="steps">${flow.map(([k, label]) => `<span class="${k === last ? 'current' : reached.has(k) ? 'done' : ''}">${label}</span>`).join('')}</div>`;
+    }
+
+    function photosHtml(i) {
+      const canEdit = i.canManage || (i.isOwn && i.status === 'open');
+      return `<div class="photos">${i.photos.map((p) => `<div class="ph">
+          <img src="/api/items/${i.id}/photos/${p.id}" data-src="/api/items/${i.id}/photos/${p.id}" alt="${esc(p.file_name)}">
+          ${p.is_public ? '' : '<span class="private">🔒 private</span>'}
+          ${canEdit ? `<span class="ph-tools">${i.item_type === 'found' ? `<button class="secondary" data-toggle="${p.id}" data-public="${p.is_public ? 0 : 1}" title="${p.is_public ? 'Make private' : 'Make public'}">${p.is_public ? '🔒' : '👁'}</button>` : ''}
+            <button class="danger" data-photo="${p.id}" title="Remove">×</button></span>` : ''}</div>`).join('')}
+        ${i.photos.length ? '' : '<p class="muted small">No photos.</p>'}</div>
+        ${(i.isOwn || i.canManage) && i.photos.length < 3 && !['returned', 'closed'].includes(i.status) ? '<label class="inline small">📷 Add photos <input type="file" id="add-photos" accept="image/jpeg,image/png,image/webp" multiple></label>' : ''}
+        <p class="error" id="photo-error"></p>`;
+    }
+
+    function officeCard(o, i) {
+      if (!o) return '';
+      return `<div class="card side">
+        <h3>${OFFICE_ICON[o.lfo_type]} ${esc(o.name)}</h3>
+        <p class="small muted" style="margin: 2px 0 8px">${esc(OFFICE_TYPE[o.lfo_type])}${i.item_type === 'found' ? ' · keeps this item' : ' · where it was also reported'}</p>
+        <dl><dt>Address</dt><dd>${esc(o.address)}</dd><dt>Phone</dt><dd>${esc(o.phone)}</dd><dt>Email</dt><dd>${esc(o.email)}</dd>${o.hours ? `<dt>Hours</dt><dd>${esc(o.hours)}</dd>` : ''}</dl>
+      </div>`;
+    }
+
+    function matchesHtml(i) {
+      if (!i.matches) return '';
+      const rows = i.matches.map((m) => `<div class="sub-item"><div class="spread">
+          <div><div class="row">${matchPill(m.match_status)} ${i.canManage ? `<span class="small muted">score ${m.score}</span>` : ''}</div>
+            <div style="margin-top: 4px"><a href="item.html?id=${m.other_id}"><strong>${esc(m.other_name)}</strong></a> <span class="small muted">${esc(m.other_ref)} · ${esc(m.other_city)} · ${formatDay(m.other_date)}${m.other_office ? ` · ${esc(m.other_office)}` : ''}</span></div>
+            ${m.decided_by_name ? `<div class="small muted">by ${esc(m.decided_by_name)} · ${formatDate(m.decided_at)}</div>` : ''}</div>
+          ${i.canManage && m.match_status === 'suggested' && canDecideMatch(i, m) ? `<div class="row"><button class="small found" data-confirm="${m.id}">Confirm</button><button class="small secondary" data-reject="${m.id}">Not a match</button></div>` : ''}
+        </div></div>`).join('');
+      return `<div class="card"><div class="spread"><h2 style="margin: 0">${i.canManage ? 'Possible matches' : 'Matched with'}</h2>
+        ${i.canManage && ['open', 'matched'].includes(i.status) ? '<button class="small secondary" id="rerun">Look again</button>' : ''}</div>
+        ${rows || '<p class="muted">No possible matches yet. The system checks again whenever a new item is reported.</p>'}</div>`;
+    }
+    // Matches are decided by the office keeping the found item.
+    const canDecideMatch = (i, m) => user.role === 'system_admin' || (i.item_type === 'found' ? i.lfo_id === user.officeId : false);
+
+    function claimsHtml(i) {
+      if (i.item_type !== 'found' || (!i.canManage && !i.claims.length)) return '';
+      return `<div class="card"><h2 style="margin-top: 0">${i.canManage ? 'Claims' : 'My claim'}</h2>
+        ${i.claims.length ? i.claims.map((c) => `<a class="sub-item list-item" href="claim.html?id=${c.id}" style="display: flex">
+          <span class="body"><span class="row">${claimPill(c.status_code, c.status)}
+            ${i.canManage && c.rejected_claims >= 2 ? `<span class="pill warn">⚠ ${c.rejected_claims} rejected claims before</span>` : ''}</span>
+            ${i.canManage ? `<strong style="display: block; margin-top: 4px">${esc(c.claimant || 'former member')}</strong>` : ''}
+            <span class="meta" style="display: block">${formatDate(c.claim_date)}${c.decision_notes ? ` · ${esc(c.decision_notes)}` : ''}</span></span></a>`).join('')
+        : '<p class="muted">No claims yet.</p>'}</div>`;
+    }
+
+    function activityHtml(i) {
+      if (!i.activity || !i.activity.length) return '';
+      return `<div class="card"><h2 style="margin-top: 0">History</h2><ul class="timeline">${i.activity.map((a) => `
+        <li><div class="when">${formatDate(a.created_at)}${a.person ? ` · ${esc(a.person)}` : ''}</div>
+          <div><strong>${esc(a.action.replace(/_/g, ' '))}</strong>${a.details ? ` – ${esc(a.details)}` : ''}</div></li>`).join('')}</ul></div>`;
+    }
+
+    function render() {
+      const i = item;
+      const ownOpen = i.isOwn && i.status === 'open';
+      const canEdit = i.canManage ? !['returned', 'closed'].includes(i.status) : ownOpen;
+      const canClose = i.canManage ? !['returned', 'closed'].includes(i.status) : ownOpen;
+      const photo = i.photos[0] ? `<img src="/api/items/${i.id}/photos/${i.photos[0].id}" alt="">` : `<span class="cat-ico">${catIcon(i.category)}</span>`;
+      document.title = `Lost & Found · ${i.ref} ${i.item_name}`;
+      const people = (i.canManage || i.isOwn) ? `
+        ${i.owner_name ? `<dt>Owner</dt><dd>${esc(i.owner_name)}${i.canManage ? `<br><span class="small">${esc(i.owner_email || '')} ${esc(i.owner_phone || '')}</span>` : ''}</dd>` : ''}
+        ${i.reporter_name ? `<dt>Reported by</dt><dd>${esc(i.reporter_name)}${i.canManage ? `<br><span class="small">${esc(i.reporter_email || '')} ${esc(i.reporter_phone || '')}</span>` : ''}</dd>` : ''}` : '';
+      document.getElementById('page').innerHTML = `
+        <div class="card">
+          <div class="hero-tag">
+            <div class="tag-photo">${photo}</div>
+            <div style="flex: 1; min-width: 0">
+              <div class="row">${kindPill(i.item_type)} ${statusPill(i)} <span class="small muted">${esc(i.ref)}</span></div>
+              <h1 style="margin-top: 8px">${esc(i.item_name)}</h1>
+              <p class="meta" style="margin: 0">${catIcon(i.category)} ${esc(i.category)} · ${i.item_type === 'lost' ? 'Lost' : 'Found'} ${formatDay(i.event_date)} · 📍 ${esc(i.place_detail ? `${i.place_detail}, ` : '')}${esc(i.city)}, ${esc(i.province)}</p>
+              ${steps(i)}
+              <div class="row" style="margin-top: 12px">
+                ${i.canClaim ? '<button class="found" id="claim">🙋 This is mine – claim it</button>' : ''}
+                ${i.canManage && i.item_type === 'found' && !i.received_at && i.status !== 'closed' ? '<button class="found" id="receive">📥 Mark handed in</button>' : ''}
+                ${canEdit ? `<a class="button secondary" href="report.html?id=${i.id}">Edit</a>` : ''}
+                ${canClose ? '<button class="secondary" id="close">Close report</button>' : ''}
+                ${i.canManage && i.status === 'closed' ? '<button class="secondary" id="reopen">Reopen</button>' : ''}
+                ${(i.canManage && !(i.claims || []).length && !(i.matches || []).some((m) => m.match_status === 'confirmed') && i.status !== 'returned') || (ownOpen && !(i.claims || []).length)
+    ? '<button class="danger" id="delete">Delete</button>' : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <div>
+            <div class="card">
+              <h2 style="margin-top: 0">Description</h2>
+              <p class="description">${esc(i.description)}</p>
+              ${i.hidden_details ? `<div class="secret"><span class="description">${esc(i.hidden_details)}</span></div>` : ''}
+              ${photosHtml(i)}
+            </div>
+            ${matchesHtml(i)}
+            ${claimsHtml(i)}
+            ${activityHtml(i)}
+          </div>
+          <div>
+            <div class="card side">
+              <dl>
+                <dt>Reference</dt><dd><strong>${esc(i.ref)}</strong></dd>
+                <dt>Category</dt><dd>${esc(i.category)}</dd>
+                ${i.colour ? `<dt>Colour</dt><dd>${esc(i.colour)}</dd>` : ''}
+                ${i.brand ? `<dt>Brand</dt><dd>${esc(i.brand)}</dd>` : ''}
+                <dt>${i.item_type === 'lost' ? 'Lost on' : 'Found on'}</dt><dd>${formatDay(i.event_date)}</dd>
+                <dt>Reported</dt><dd>${formatDate(i.date_reported)}</dd>
+                ${i.item_type === 'found' ? `<dt>At the office</dt><dd>${i.received_at ? `${formatDate(i.received_at)}${i.received_by_name ? `<br><span class="small muted">${esc(i.received_by_name)}</span>` : ''}` : '<span class="pill s-waiting">Not handed in yet</span>'}</dd>` : ''}
+                ${i.storage_location && (i.canManage) ? `<dt>Stored at</dt><dd>${esc(i.storage_location)}</dd>` : ''}
+                ${people}
+              </dl>
+            </div>
+            ${officeCard(i.office, i)}
+          </div>
+        </div>`;
+      wire();
+    }
+
+    async function reload(message) {
+      item = await api(`/api/items/${id}`);
+      render();
+      if (message) flash(message);
+    }
+
+    async function act(errorId, fn) {
+      const el = errorId && document.getElementById(errorId);
+      if (el) el.textContent = '';
+      try { await fn(); } catch (err) { if (el) el.textContent = err.message; else alert(err.message); }
+    }
+
+    function wire() {
+      const i = item;
+      document.querySelectorAll('.photos img').forEach((img) => { img.onclick = () => lightbox(img.dataset.src); });
+      document.querySelectorAll('[data-photo]').forEach((b) => {
+        b.onclick = () => act('photo-error', async () => {
+          if (!confirm('Remove this photo?')) return;
+          await api(`/api/items/${i.id}/photos/${b.dataset.photo}`, { method: 'DELETE' });
+          await reload('Photo removed.');
+        });
+      });
+      document.querySelectorAll('[data-toggle]').forEach((b) => {
+        b.onclick = () => act('photo-error', async () => {
+          await api(`/api/items/${i.id}/photos/${b.dataset.toggle}`, { method: 'PUT', body: { isPublic: b.dataset.public === '1' } });
+          await reload(b.dataset.public === '1' ? 'The photo is now visible to everyone.' : 'The photo is now private.');
+        });
+      });
+      const add = document.getElementById('add-photos');
+      if (add) {
+        add.onchange = () => act('photo-error', async () => {
+          const photos = await readImageFiles(add.files);
+          await api(`/api/items/${i.id}/photos`, { method: 'POST', body: { photos: photos.map(({ name, type, data }) => ({ name, type, data, isPublic: true })) } });
+          await reload('Photo added.');
+        });
+      }
+      const on = (elId, fn) => { const el = document.getElementById(elId); if (el) el.onclick = fn; };
+      on('claim', async () => {
+        document.getElementById('claim-form').reset();
+        document.getElementById('c-error').textContent = '';
+        const mine = (await api('/api/items?mine=1&type=lost&active=1')).filter((x) => x.owner_id === user.id);
+        document.getElementById('c-lost-box').classList.toggle('hidden', !mine.length);
+        document.getElementById('c-lost').innerHTML = optionsHtml(mine, i.myMatchedLostId, '— Not linked —', (x) => `${x.ref} · ${x.item_name}`);
+        document.getElementById('claim-dialog').showModal();
+      });
+      on('receive', () => { document.getElementById('r-storage').value = i.storage_location || ''; document.getElementById('receive-dialog').showModal(); });
+      on('close', () => {
+        document.getElementById('close-form').reset();
+        document.getElementById('close-error').textContent = '';
+        document.getElementById('close-help').textContent = i.canManage
+          ? 'For an incomplete or fraudulent report, or an item disposed of after nobody claimed it. Open claims on it are rejected with this reason.'
+          : i.item_type === 'lost' ? 'For example: you found it yourself.' : 'For example: the owner already got it back.';
+        document.getElementById('close-dialog').showModal();
+      });
+      on('reopen', () => act(null, async () => {
+        await api(`/api/items/${i.id}/reopen`, { method: 'POST' });
+        await reload('Report reopened.');
+      }));
+      on('delete', () => act(null, async () => {
+        if (!confirm('Delete this report? Use this only for a report entered by mistake.')) return;
+        await api(`/api/items/${i.id}`, { method: 'DELETE' });
+        location.href = 'dashboard.html';
+      }));
+      on('rerun', () => act(null, async () => {
+        const r = await api(`/api/matches/run/${i.id}`, { method: 'POST' });
+        await reload(`${r.suggestions} possible match${r.suggestions === 1 ? '' : 'es'}.`);
+      }));
+      document.querySelectorAll('[data-confirm]').forEach((b) => {
+        b.onclick = () => act(null, async () => {
+          await api(`/api/matches/${b.dataset.confirm}`, { method: 'PUT', body: { decision: 'confirm' } });
+          await reload('Match confirmed. The owner can now claim the item.');
+        });
+      });
+      document.querySelectorAll('[data-reject]').forEach((b) => {
+        b.onclick = () => act(null, async () => {
+          await api(`/api/matches/${b.dataset.reject}`, { method: 'PUT', body: { decision: 'reject' } });
+          await reload('Suggestion rejected.');
+        });
+      });
+    }
+
+    document.getElementById('c-cancel').onclick = () => document.getElementById('claim-dialog').close();
+    document.getElementById('claim-form').onsubmit = (e) => {
+      e.preventDefault();
+      act('c-error', async () => {
+        const r = await api('/api/claims', { method: 'POST', body: {
+          foundItemId: id, proofDescription: document.getElementById('c-proof').value, lostItemId: document.getElementById('c-lost').value,
+        } });
+        location.href = `claim.html?id=${r.id}&new=1`;
+      });
+    };
+    document.getElementById('close-cancel').onclick = () => document.getElementById('close-dialog').close();
+    document.getElementById('close-form').onsubmit = (e) => {
+      e.preventDefault();
+      act('close-error', async () => {
+        await api(`/api/items/${id}/close`, { method: 'POST', body: { reason: document.getElementById('close-reason').value } });
+        document.getElementById('close-dialog').close();
+        await reload('Report closed.');
+      });
+    };
+    document.getElementById('r-cancel').onclick = () => document.getElementById('receive-dialog').close();
+    document.getElementById('receive-form').onsubmit = (e) => {
+      e.preventDefault();
+      act('r-error', async () => {
+        await api(`/api/items/${id}/receive`, { method: 'POST', body: { storageLocation: document.getElementById('r-storage').value } });
+        document.getElementById('receive-dialog').close();
+        await reload('Marked as handed in.');
+      });
+    };
+
+    (async () => {
+      user = await requireUser();
+      try {
+        await reload();
+        const n = param('new');
+        if (n !== null) {
+          document.getElementById('banner').innerHTML = `<div class="success">Thank you – your report was saved as <strong>${esc(item.ref)}</strong>.
+            ${item.item_type === 'found' && !item.received_at ? ` Please hand the item in at ${esc(item.office.name)}.` : ''}
+            ${Number(n) > 0 ? ` The system found ${n} possible match${n === '1' ? '' : 'es'}; the office will check ${n === '1' ? 'it' : 'them'}.` : ''}</div>`;
+        }
+      } catch (err) {
+        document.getElementById('page').innerHTML = `<div class="card empty">${esc(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

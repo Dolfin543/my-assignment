@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Dashboard</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1 id="greeting">Hello</h1>
+        <p class="muted" id="subtitle"></p>
+      </div>
+    </div>
+
+    <!-- Members -->
+    <section id="member" class="hidden">
+      <div class="actions-row">
+        <a class="action-big lost" href="report.html?type=lost"><span class="ico">📣</span><span><strong>I lost something</strong><span class="d">Report it and we'll look for a match</span></span></a>
+        <a class="action-big found" href="report.html?type=found"><span class="ico">🙌</span><span><strong>I found something</strong><span class="d">Report it and hand it in at an office</span></span></a>
+        <a class="action-big browse" href="browse.html"><span class="ico">🔎</span><span><strong>Browse found items</strong><span class="d" id="board-count">See what was handed in</span></span></a>
+      </div>
+      <div id="match-news"></div>
+      <h2>My lost items</h2>
+      <div class="board" id="my-lost"></div>
+      <h2>Items I found</h2>
+      <div class="board" id="my-found"></div>
+      <h2>My claims</h2>
+      <div id="my-claims"></div>
+    </section>
+
+    <!-- Office admins and the system admin -->
+    <section id="staff" class="hidden">
+      <div class="stats" id="stats"></div>
+      <div class="two-col" style="margin-top: 8px">
+        <div>
+          <h2>Claims to decide</h2>
+          <div id="queue-claims"></div>
+          <h2>Suggested matches</h2>
+          <div id="queue-matches"></div>
+        </div>
+        <div>
+          <h2>Found items not handed in yet</h2>
+          <div id="queue-receive"></div>
+          <h2>Recent lost reports in the area</h2>
+          <div id="queue-lost"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script>
+    function listItem(i, extra = '') {
+      const thumb = i.photo_id ? `<img src="/api/items/${i.id}/photos/${i.photo_id}" alt="">` : catIcon(i.category);
+      return `<a class="card list-item" href="item.html?id=${i.id}"><span class="thumb">${thumb}</span>
+        <span class="body"><span class="row">${kindPill(i.item_type)} ${statusPill(i)} <span class="small muted">${esc(i.ref)}</span></span>
+        <span class="item-title" style="display: block">${esc(i.item_name)}</span>
+        <span class="meta">${esc(i.category)} · ${esc(i.city)} · ${formatDay(i.event_date)}${extra}</span></span></a>`;
+    }
+
+    (async () => {
+      const user = await requireUser();
+      document.getElementById('greeting').textContent = `Hello, ${user.firstName}`;
+      const s = await api('/api/stats/dashboard');
+
+      if (user.role === 'member') {
+        document.getElementById('subtitle').textContent = 'Your lost and found reports and your claims.';
+        document.getElementById('member').classList.remove('hidden');
+        document.getElementById('board-count').textContent = `${num(s.found_on_board)} item${s.found_on_board === 1 ? '' : 's'} waiting for their owners`;
+        const mine = await api('/api/items?mine=1');
+        const lost = mine.filter((i) => i.item_type === 'lost');
+        const found = mine.filter((i) => i.item_type === 'found');
+        document.getElementById('my-lost').innerHTML = lost.length ? lost.map(tagCard).join('') : '<div class="board-empty">You have not reported anything lost. 🤞</div>';
+        document.getElementById('my-found').innerHTML = found.length ? found.map(tagCard).join('') : '<div class="board-empty">Found something? Thank you for reporting it.</div>';
+        const matches = (await api('/api/matches')).filter((m) => m.lost_status === 'matched');
+        document.getElementById('match-news').innerHTML = matches.map((m) => `
+          <div class="card" style="margin-top: 16px; border-left: 6px solid var(--found)">
+            <strong>🎉 Your ${esc(m.lost_name)} (${esc(m.lost_ref)}) may have been found!</strong>
+            <div class="meta">${esc(m.office_name)} has a matching item (${esc(m.found_ref)}). Claim it and describe what makes it yours.</div>
+            <a class="button found small" style="margin-top: 8px" href="item.html?id=${m.found_item_id}">See the found item and claim it</a>
+          </div>`).join('');
+        const claims = await api('/api/claims?mine=1');
+        document.getElementById('my-claims').innerHTML = claims.length ? claims.map((c) => `
+          <a class="card list-item" href="claim.html?id=${c.id}"><span class="thumb">${catIcon(c.category)}</span>
+            <span class="body"><span class="row">${claimPill(c.status_code, c.status)} <span class="small muted">${esc(c.found_ref)}</span></span>
+            <span class="item-title" style="display: block">${esc(c.item_name)}</span>
+            <span class="meta">${esc(c.office_name)} · claimed ${timeAgo(c.claim_date)}</span></span></a>`).join('')
+          : '<div class="card empty">No claims yet. When you see your item on the board, open it and click "This is mine".</div>';
+        return;
+      }
+
+      document.getElementById('subtitle').textContent = user.role === 'office_admin' ? `${user.officeName} · office admin` : 'System administrator';
+      document.getElementById('staff').classList.remove('hidden');
+      const stat = (value, label, href, cls = '') => `<a class="stat ${cls}" href="${href}"><div class="value">${num(value)}</div><div class="label">${label}</div></a>`;
+      document.getElementById('stats').innerHTML = [
+        stat(s.claims_to_decide, 'Claims to decide', 'claims.html?status=open', 'lost'),
+        stat(s.suggested_matches, 'Suggested matches', 'matches.html'),
+        stat(s.to_receive, 'Not handed in yet', 'browse.html?type=found&notReceived=1'),
+        stat(s.items_held, 'Items held', 'browse.html?type=found&active=1', 'found'),
+        stat(s.awaiting_collection, 'Awaiting collection', 'browse.html?type=found&status=claimed'),
+        stat(s.lost_in_area, user.role === 'office_admin' ? 'Lost reports in the province' : 'Open lost reports', 'browse.html?type=lost&active=1', 'lost'),
+        ...(user.role === 'system_admin' ? [stat(s.offices, 'Active offices', 'offices.html'), stat(s.people, 'People', 'admin.html')] : []),
+      ].join('');
+
+      const claims = (await api('/api/claims?open=1')).filter((c) => ['pending', 'under_review'].includes(c.status_code)).slice(0, 6);
+      document.getElementById('queue-claims').innerHTML = claims.length ? claims.map((c) => `
+        <a class="card list-item" href="claim.html?id=${c.id}"><span class="thumb">${catIcon(c.category)}</span>
+          <span class="body"><span class="row">${claimPill(c.status_code, c.status)} ${c.rejected_claims >= 2 ? `<span class="pill warn">⚠ ${c.rejected_claims} rejected claims</span>` : ''}</span>
+          <span class="item-title" style="display: block">${esc(c.item_name)} <span class="small muted">${esc(c.found_ref)}</span></span>
+          <span class="meta">${esc(c.claimant || 'former member')} · ${timeAgo(c.claim_date)}</span></span></a>`).join('') : '<div class="card empty">No claims waiting. 👍</div>';
+      const matches = (await api('/api/matches?status=suggested&active=1')).slice(0, 5);
+      document.getElementById('queue-matches').innerHTML = matches.length ? matches.map((m) => `
+        <a class="card list-item" href="matches.html"><span class="thumb">🔗</span><span class="body">
+          <span class="row">${matchPill(m.match_status)} <span class="small muted">score ${m.score}</span></span>
+          <span class="item-title" style="display: block">${esc(m.lost_name)} ↔ ${esc(m.found_name)}</span>
+          <span class="meta">${esc(m.lost_ref)} · ${esc(m.found_ref)} · ${esc(m.office_name)}</span></span></a>`).join('') : '<div class="card empty">No suggestions to review.</div>';
+      const toReceive = (await api('/api/items?type=found&notReceived=1')).filter((i) => user.role === 'system_admin' || i.lfo_id === user.officeId).slice(0, 5);
+      document.getElementById('queue-receive').innerHTML = toReceive.length ? toReceive.map((i) => listItem(i, ` · ${esc(i.office_name)}`)).join('') : '<div class="card empty">Nothing waiting to be handed in.</div>';
+      const lost = (await api('/api/items?type=lost&active=1')).slice(0, 5);
+      document.getElementById('queue-lost').innerHTML = lost.length ? lost.map((i) => listItem(i)).join('') : '<div class="card empty">No open lost reports.</div>';
+    })();
+  </script>
+</body>
+</html>

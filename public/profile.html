@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · My profile</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main class="narrow">
+    <h1>My profile</h1>
+    <p class="muted" id="who"></p>
+    <div id="banner"></div>
+    <div id="must-change" class="notice hidden">You are using a temporary password. Choose your own password to continue.</div>
+
+    <div class="card" id="details-card">
+      <h2 style="margin-top: 0">My details</h2>
+      <form id="details-form">
+        <div class="grid-2">
+          <div><label for="first">First name</label><input type="text" id="first" required maxlength="60"></div>
+          <div><label for="last">Last name</label><input type="text" id="last" required maxlength="60"></div>
+        </div>
+        <div class="grid-3">
+          <div><label for="email">Email</label><input type="email" id="email" required></div>
+          <div><label for="phone">Phone</label><input type="tel" id="phone" maxlength="20"></div>
+          <div><label for="dob">Date of birth</label><input type="date" id="dob"></div>
+        </div>
+        <fieldset><legend>Address <span class="muted small">(optional)</span></legend>
+          <div class="grid-2">
+            <div><label for="number">Street number</label><input type="text" id="number" maxlength="10"></div>
+            <div><label for="street">Street name</label><input type="text" id="street" maxlength="100"></div>
+          </div>
+          <label for="suburb">Suburb</label><input type="text" id="suburb" maxlength="80">
+          <div class="grid-2">
+            <div><label for="province">Province</label><select id="province"></select></div>
+            <div><label for="city">City</label><select id="city"></select></div>
+          </div>
+          <p class="hint">Your city is filled in when you report an item. Clear all address fields to remove your address.</p>
+        </fieldset>
+        <p class="error" id="details-error"></p>
+        <button type="submit" style="margin-top: 12px">Save details</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top: 0">Change password</h2>
+      <form id="password-form">
+        <div class="grid-2">
+          <div><label for="current">Current password</label><input type="password" id="current" required autocomplete="current-password"></div>
+          <div><label for="new">New password <span class="muted small">(at least 8 characters)</span></label><input type="password" id="new" required minlength="8" autocomplete="new-password"></div>
+        </div>
+        <p class="error" id="password-error"></p>
+        <button type="submit" style="margin-top: 12px">Change password</button>
+      </form>
+    </div>
+
+    <div class="card danger-zone hidden" id="delete-card">
+      <h2>Delete my account</h2>
+      <p>Your login and address are removed. Reports and claims stay in the records without your name, so items can still be returned.</p>
+      <form id="delete-form" class="row">
+        <input type="password" id="delete-password" placeholder="Your password" required style="max-width: 240px" autocomplete="current-password">
+        <button type="submit" class="danger">Delete my account</button>
+      </form>
+      <p class="error" id="delete-error"></p>
+    </div>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script>
+    (async () => {
+      const user = await requireUser();
+      const codes = [user.ownerCode && `owner ${user.ownerCode}`, user.reporterCode && `reporter ${user.reporterCode}`].filter(Boolean).join(' · ');
+      document.getElementById('who').innerHTML = `@${esc(user.username)} · <span class="pill r-${user.role}">${ROLE_LABEL[user.role]}</span>${user.officeName ? ` · ${esc(user.officeName)}` : ''}${codes ? ` · <span class="small">${esc(codes)}</span>` : ''}`;
+      const set = (elId, v) => { document.getElementById(elId).value = v ?? ''; };
+      set('first', user.firstName); set('last', user.lastName); set('email', user.email); set('phone', user.phone); set('dob', user.dob);
+      set('number', user.streetNumber); set('street', user.streetName); set('suburb', user.suburb);
+      await cityPicker(document.getElementById('province'), document.getElementById('city'), { placeholderAll: '—', cityId: user.cityId });
+      if (user.mustChangePassword) {
+        document.getElementById('must-change').classList.remove('hidden');
+        document.getElementById('details-card').classList.add('hidden');
+      }
+      if (user.role === 'member') document.getElementById('delete-card').classList.remove('hidden');
+      const v = (elId) => document.getElementById(elId).value;
+
+      document.getElementById('details-form').onsubmit = async (e) => {
+        e.preventDefault();
+        document.getElementById('details-error').textContent = '';
+        try {
+          await api('/api/auth/me', { method: 'PUT', body: {
+            firstName: v('first'), lastName: v('last'), email: v('email'), phone: v('phone'), dob: v('dob'),
+            streetNumber: v('number'), streetName: v('street'), suburb: v('suburb'), cityId: v('city'),
+          } });
+          flash('Your details were saved.');
+        } catch (err) { document.getElementById('details-error').textContent = err.message; }
+      };
+      document.getElementById('password-form').onsubmit = async (e) => {
+        e.preventDefault();
+        document.getElementById('password-error').textContent = '';
+        try {
+          const updated = await api('/api/auth/password', { method: 'PUT', body: { currentPassword: v('current'), newPassword: v('new') } });
+          if (user.mustChangePassword) { location.href = homeFor(updated); return; }
+          e.target.reset();
+          flash('Your password was changed.');
+        } catch (err) { document.getElementById('password-error').textContent = err.message; }
+      };
+      document.getElementById('delete-form').onsubmit = async (e) => {
+        e.preventDefault();
+        if (!confirm('Delete your account? This cannot be undone.')) return;
+        try {
+          await api('/api/auth/me', { method: 'DELETE', body: { password: v('delete-password') } });
+          location.href = '/';
+        } catch (err) { document.getElementById('delete-error').textContent = err.message; }
+      };
+    })();
+  </script>
+</body>
+</html>

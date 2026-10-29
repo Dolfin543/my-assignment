@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Report</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main class="narrow">
+    <div class="page-head">
+      <div>
+        <h1 id="title">Report an item</h1>
+        <p class="muted" id="intro"></p>
+      </div>
+    </div>
+
+    <div class="kind-switch" id="kind-switch">
+      <a href="report.html?type=lost" class="lost" id="kind-lost"><strong>📣 I lost something</strong><span class="small muted">We'll look for it among the items handed in.</span></a>
+      <a href="report.html?type=found" class="found" id="kind-found"><strong>🙌 I found something</strong><span class="small muted">Tell us where you'll hand it in.</span></a>
+    </div>
+
+    <form id="form" class="card" onsubmit="return false">
+      <div class="grid-2">
+        <div><label for="item-name">What is it?</label><input type="text" id="item-name" required minlength="2" maxlength="100" placeholder="e.g. Black leather wallet"></div>
+        <div><label for="category">Category</label><select id="category" required></select></div>
+      </div>
+      <label for="description">Description</label>
+      <textarea id="description" required minlength="5" maxlength="3000" placeholder="What does it look like? Size, colour, marks, case or cover…"></textarea>
+      <p class="hint" id="description-hint"></p>
+      <div class="grid-2">
+        <div><label for="colour">Colour <span class="muted small">(optional)</span></label><input type="text" id="colour" maxlength="40"></div>
+        <div><label for="brand">Brand <span class="muted small">(optional)</span></label><input type="text" id="brand" maxlength="60"></div>
+      </div>
+
+      <fieldset>
+        <legend id="where-legend">Where and when?</legend>
+        <div class="grid-3">
+          <div><label for="event-date" id="date-label">Date</label><input type="date" id="event-date" required></div>
+          <div><label for="province">Province</label><select id="province" required></select></div>
+          <div><label for="city">City / town</label><select id="city" required></select></div>
+        </div>
+        <label for="place">Place <span class="muted small">(street, shop, bus, taxi rank… optional)</span></label>
+        <input type="text" id="place" maxlength="200">
+      </fieldset>
+
+      <fieldset id="office-box">
+        <legend id="office-legend">Lost-and-found office</legend>
+        <label for="office" id="office-label">Office</label>
+        <select id="office"></select>
+        <p class="hint" id="office-hint"></p>
+        <div id="found-extra" class="hidden">
+          <label for="hidden">Details only the owner would know <span class="muted small">(kept secret, optional)</span></label>
+          <textarea id="hidden" maxlength="1000" style="min-height: 70px" placeholder="e.g. name on the ID card inside, serial number, lock screen picture, engraving"></textarea>
+          <p class="hint">Only office admins see this. Someone who claims the item must describe these details, so it goes back to the real owner.</p>
+          <div id="storage-box" class="hidden">
+            <label for="storage">Storage location at the office</label>
+            <input type="text" id="storage" maxlength="100" placeholder="e.g. Shelf B2, bag 14">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset id="photo-box">
+        <legend>Photos <span class="muted small">(up to 3, JPEG/PNG/WebP, 2 MB each)</span></legend>
+        <input type="file" id="photos" accept="image/jpeg,image/png,image/webp" multiple style="margin-top: 10px">
+        <div class="photo-previews" id="previews"></div>
+        <p class="hint" id="photo-hint"></p>
+      </fieldset>
+
+      <p class="error" id="error"></p>
+      <div class="row" style="margin-top: 14px">
+        <button type="submit" id="submit">Submit report</button>
+        <a class="button secondary" href="dashboard.html" id="cancel">Cancel</a>
+      </div>
+    </form>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script>
+    const editId = param('id');
+    let type = param('type') === 'found' ? 'found' : 'lost';
+    let photos = [];
+    let user;
+
+    function renderPreviews() {
+      document.getElementById('previews').innerHTML = photos.map((p, i) => `
+        <div class="p"><img src="${p.preview}" alt=""><button type="button" class="danger" data-i="${i}" title="Remove">×</button>
+          ${type === 'found' ? `<label><input type="checkbox" data-private="${i}" ${p.isPublic ? '' : 'checked'}> private</label>` : ''}</div>`).join('');
+      document.querySelectorAll('#previews button').forEach((b) => { b.onclick = () => { photos.splice(Number(b.dataset.i), 1); renderPreviews(); }; });
+      document.querySelectorAll('[data-private]').forEach((c) => { c.onchange = () => { photos[Number(c.dataset.private)].isPublic = !c.checked; }; });
+    }
+    document.getElementById('photos').onchange = async (e) => {
+      const errorEl = document.getElementById('error');
+      errorEl.textContent = '';
+      try {
+        const added = await readImageFiles(e.target.files);
+        if (photos.length + added.length > 3) throw new Error('You can attach at most 3 photos.');
+        photos = photos.concat(added);
+        renderPreviews();
+      } catch (err) { errorEl.textContent = err.message; }
+      e.target.value = '';
+    };
+
+    function applyType() {
+      const lost = type === 'lost';
+      document.getElementById(`kind-${type}`).classList.add('on');
+      document.getElementById('title').textContent = editId ? 'Edit report' : lost ? 'Report a lost item' : (isStaff(user) ? 'Log a found item' : 'Report a found item');
+      document.getElementById('intro').textContent = lost
+        ? 'Describe it well: the system compares your report with every item handed in nearby.'
+        : 'Thank you for doing the right thing. Describe the item, but keep the details only the owner would know in the secret box.';
+      document.getElementById('date-label').textContent = lost ? 'Date you lost it' : 'Date you found it';
+      document.getElementById('description-hint').textContent = lost ? 'Say what makes it yours, but you can keep very personal details for when you claim it.' : 'Describe it in general terms. Anyone browsing can read this.';
+      document.getElementById('office-legend').textContent = lost ? 'Reported at an office? (optional)' : 'Where will it be kept?';
+      document.getElementById('office-label').textContent = lost ? 'Office where you also reported it' : 'Lost-and-found office';
+      document.getElementById('office-hint').textContent = lost ? 'For example the police station where you opened a case.' : 'Hand the item in at this office. It shows "Not handed in yet" until the office has it.';
+      document.getElementById('found-extra').classList.toggle('hidden', lost);
+      document.getElementById('photo-hint').textContent = lost ? '' : 'Tick "private" on a photo that shows the secret details; only office admins will see it.';
+      document.getElementById('submit').className = lost ? 'lost' : 'found';
+      document.getElementById('submit').textContent = editId ? 'Save changes' : lost ? 'Report lost item' : (isStaff(user) ? 'Log found item' : 'Report found item');
+    }
+
+    (async () => {
+      user = await requireUser();
+      const [categories, offices] = await Promise.all([api('/api/categories'), api('/api/offices')]);
+      document.getElementById('category').innerHTML = optionsHtml(categories, null, 'Choose…', (c) => `${catIcon(c.name)} ${c.name}`);
+      const officeSelect = document.getElementById('office');
+      const picker = await cityPicker(document.getElementById('province'), document.getElementById('city'), { cityId: user.cityId });
+      document.getElementById('event-date').max = todayInput();
+      document.getElementById('event-date').value = todayInput();
+
+      const fillOffices = (selected) => {
+        const provinceId = Number(document.getElementById('province').value);
+        const list = offices.filter((o) => !provinceId || o.province_id === provinceId);
+        officeSelect.innerHTML = optionsHtml(list.length ? list : offices, selected, type === 'lost' ? '— None —' : 'Choose an office…', (o) => `${OFFICE_ICON[o.lfo_type]} ${o.name} (${o.city})`);
+      };
+      document.getElementById('province').addEventListener('change', () => fillOffices(officeSelect.value));
+
+      if (editId) {
+        const i = await api(`/api/items/${editId}`);
+        type = i.item_type;
+        document.getElementById('kind-switch').classList.add('hidden');
+        document.getElementById('photo-box').classList.add('hidden');
+        document.getElementById('cancel').href = `item.html?id=${i.id}`;
+        document.getElementById('item-name').value = i.item_name;
+        document.getElementById('category').innerHTML = optionsHtml(categories.some((c) => c.id === i.category_id) ? categories : categories.concat([{ id: i.category_id, name: i.category }]), i.category_id, 'Choose…');
+        document.getElementById('description').value = i.description;
+        document.getElementById('colour').value = i.colour || '';
+        document.getElementById('brand').value = i.brand || '';
+        document.getElementById('event-date').value = String(i.event_date).slice(0, 10);
+        picker.set(i.city_id);
+        document.getElementById('place').value = i.place_detail || '';
+        fillOffices(i.lfo_id);
+        document.getElementById('hidden').value = i.hidden_details || '';
+        document.getElementById('storage').value = i.storage_location || '';
+        if (type === 'found' && !i.canManage && i.received_at) document.getElementById('hidden').closest('div').classList.add('hidden');
+        if (type === 'found' && user.role !== 'system_admin') officeSelect.disabled = true;
+        document.getElementById('storage-box').classList.toggle('hidden', !i.canManage);
+      } else {
+        fillOffices(user.role === 'office_admin' && type === 'found' ? user.officeId : null);
+        document.getElementById('storage-box').classList.toggle('hidden', !isStaff(user));
+      }
+      applyType();
+
+      document.getElementById('form').onsubmit = async (e) => {
+        e.preventDefault(); // an async handler returns a promise, so returning false would not stop the browser's own submit
+        const errorEl = document.getElementById('error');
+        errorEl.textContent = '';
+        const v = (id) => document.getElementById(id).value;
+        const body = {
+          itemName: v('item-name'), categoryId: v('category'), description: v('description'), colour: v('colour'), brand: v('brand'),
+          cityId: v('city'), placeDetail: v('place'), officeId: v('office'),
+        };
+        if (type === 'lost') body.dateLost = v('event-date');
+        else Object.assign(body, { foundDate: v('event-date'), hiddenDetails: v('hidden'), storageLocation: v('storage') });
+        const btn = document.getElementById('submit');
+        btn.disabled = true;
+        try {
+          if (editId) {
+            await api(`/api/items/${editId}`, { method: 'PUT', body });
+            location.href = `item.html?id=${editId}`;
+          } else {
+            body.photos = photos.map(({ name, type: t, data, isPublic }) => ({ name, type: t, data, isPublic }));
+            const r = await api(`/api/items/${type}`, { method: 'POST', body });
+            location.href = `item.html?id=${r.id}&new=${r.suggestions}`;
+          }
+        } catch (err) {
+          errorEl.textContent = err.message;
+          btn.disabled = false;
+        }
+      };
+    })();
+  </script>
+</body>
+</html>

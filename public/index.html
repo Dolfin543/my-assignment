@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Log in</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="auth">
+    <div class="auth-board">
+      <div class="brand"><span class="logo"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 6h20l12 12v22a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4z" fill="#e0a458"/><circle cx="31" cy="15" r="3.6" fill="#1f2a44"/><circle cx="20" cy="27" r="7" fill="none" stroke="#1f2a44" stroke-width="3.2"/><path d="M25 32l6 6" stroke="#1f2a44" stroke-width="3.6" stroke-linecap="round"/></svg></span><strong>Lost &amp; Found</strong></div>
+      <h1>Lost something? Found something?</h1>
+      <p>Report it here. Malls, police stations and airports keep what is handed in, the system matches lost and found reports, and the office checks every claim so items go back to their real owners.</p>
+      <div class="mini-tags"><span>Lost · wallet</span><span>Found · keys</span><span>Returned ✓</span></div>
+    </div>
+
+    <div class="auth-side">
+      <div class="card">
+        <div class="tabs" style="display: flex">
+          <button id="tab-login" class="active" style="flex: 1">Log in</button>
+          <button id="tab-register" style="flex: 1">Create account</button>
+        </div>
+
+        <form id="login-form">
+          <label for="login-username">Username or email</label>
+          <input type="text" id="login-username" required autocomplete="username">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" required autocomplete="current-password">
+          <p class="error" id="login-error"></p>
+          <button type="submit">Log in</button>
+        </form>
+
+        <form id="register-form" class="hidden">
+          <div class="grid-2">
+            <div><label for="reg-first">First name</label><input type="text" id="reg-first" required maxlength="60" autocomplete="given-name"></div>
+            <div><label for="reg-last">Last name</label><input type="text" id="reg-last" required maxlength="60" autocomplete="family-name"></div>
+          </div>
+          <div class="grid-2">
+            <div><label for="reg-username">Username</label><input type="text" id="reg-username" required maxlength="30" pattern="[a-zA-Z0-9._\-]{3,30}" autocomplete="username"></div>
+            <div><label for="reg-email">Email</label><input type="email" id="reg-email" required autocomplete="email"></div>
+          </div>
+          <label for="reg-password">Password <span class="muted small">(at least 8 characters)</span></label>
+          <input type="password" id="reg-password" required minlength="8" autocomplete="new-password">
+          <div class="grid-2">
+            <div><label for="reg-phone">Phone <span class="muted small">(optional)</span></label><input type="tel" id="reg-phone" maxlength="20" autocomplete="tel"></div>
+            <div><label for="reg-dob">Date of birth <span class="muted small">(optional)</span></label><input type="date" id="reg-dob"></div>
+          </div>
+          <fieldset>
+            <legend>Address <span class="muted small">(optional)</span></legend>
+            <div class="grid-2">
+              <div><label for="reg-number">Street number</label><input type="text" id="reg-number" maxlength="10" placeholder="12"></div>
+              <div><label for="reg-street">Street name</label><input type="text" id="reg-street" maxlength="100"></div>
+            </div>
+            <label for="reg-suburb">Suburb</label><input type="text" id="reg-suburb" maxlength="80">
+            <div class="grid-2">
+              <div><label for="reg-province">Province</label><select id="reg-province"></select></div>
+              <div><label for="reg-city">City</label><select id="reg-city"></select></div>
+            </div>
+          </fieldset>
+          <p class="hint">Office staff get their accounts from the system administrator.</p>
+          <p class="error" id="register-error"></p>
+          <button type="submit">Create account</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    api('/api/auth/me').then((user) => { location.href = homeFor(user); }).catch(() => {});
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    function showTab(register) {
+      loginForm.classList.toggle('hidden', register);
+      registerForm.classList.toggle('hidden', !register);
+      document.getElementById('tab-login').classList.toggle('active', !register);
+      document.getElementById('tab-register').classList.toggle('active', register);
+    }
+    document.getElementById('tab-login').onclick = () => showTab(false);
+    document.getElementById('tab-register').onclick = () => showTab(true);
+    if (location.hash === '#register') showTab(true);
+    cityPicker(document.getElementById('reg-province'), document.getElementById('reg-city'), { placeholderAll: '—' }).catch(() => {});
+    const v = (id) => document.getElementById(id).value;
+
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      document.getElementById('login-error').textContent = '';
+      try {
+        const user = await api('/api/auth/login', { method: 'POST', body: { username: v('login-username'), password: v('login-password') } });
+        location.href = homeFor(user);
+      } catch (err) { document.getElementById('login-error').textContent = err.message; }
+    };
+    registerForm.onsubmit = async (e) => {
+      e.preventDefault();
+      document.getElementById('register-error').textContent = '';
+      try {
+        const user = await api('/api/auth/register', { method: 'POST', body: {
+          firstName: v('reg-first'), lastName: v('reg-last'), username: v('reg-username'), email: v('reg-email'), password: v('reg-password'),
+          phone: v('reg-phone'), dob: v('reg-dob'), streetNumber: v('reg-number'), streetName: v('reg-street'), suburb: v('reg-suburb'), cityId: v('reg-city'),
+        } });
+        location.href = homeFor(user);
+      } catch (err) { document.getElementById('register-error').textContent = err.message; }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Reports</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Reports</h1>
+        <p class="muted" id="intro"></p>
+      </div>
+      <button class="secondary" onclick="print()">Print</button>
+    </div>
+    <div class="card">
+      <div class="row" style="align-items: flex-end">
+        <div><label for="from">From</label><input type="date" id="from"></div>
+        <div><label for="to">To</label><input type="date" id="to"></div>
+        <div id="area" class="row" style="align-items: flex-end">
+          <div><label for="province">Province</label><select id="province"></select></div>
+          <div><label for="city">City</label><select id="city"></select></div>
+          <div><label for="office">Office</label><select id="office"></select></div>
+        </div>
+        <button id="run">Show report</button>
+      </div>
+      <p class="error" id="error"></p>
+    </div>
+    <div id="report"></div>
+  </main>
+
+  <script src="js/common.js"></script>
+  <script>
+    let user;
+    async function run() {
+      document.getElementById('error').textContent = '';
+      const p = new URLSearchParams({ from: document.getElementById('from').value, to: document.getElementById('to').value });
+      for (const [elId, key] of [['province', 'provinceId'], ['city', 'cityId'], ['office', 'officeId']]) {
+        if (document.getElementById(elId).value) p.set(key, document.getElementById(elId).value);
+      }
+      try {
+        const r = await api(`/api/reports/summary?${p}`);
+        const t = r.totals; const c = r.claims;
+        const stat = (value, label, cls = '') => `<div class="stat ${cls}"><div class="value">${value ?? '—'}</div><div class="label">${label}</div></div>`;
+        document.getElementById('report').innerHTML = `
+          <div class="stats">
+            ${stat(num(t.lost), 'Lost reports', 'lost')}${stat(num(t.found), 'Found items', 'found')}${stat(num(t.returned), 'Found items returned')}
+            ${stat(t.recovery_rate === null ? '—' : `${t.recovery_rate}%`, 'Lost items recovered')}${stat(num(t.still_open), 'Still open')}${stat(num(t.closed), 'Closed')}
+          </div>
+          <div class="stats">
+            ${stat(num(c.submitted), 'Claims made')}${stat(num(c.waiting), 'Waiting for a decision')}${stat(num(c.approved), 'Approved')}
+            ${stat(num(c.rejected), 'Rejected', 'lost')}${stat(c.avg_hours_to_decide, 'Avg. hours to decide')}${stat(c.avg_days_to_return, 'Avg. days found → returned')}
+          </div>
+          <div class="two-col" style="margin-top: 8px">
+            <div class="card"><h2 style="margin-top: 0">By category</h2>
+              <div class="legend"><span style="--c: var(--lost)">Lost</span><span style="--c: var(--found)">Found</span></div>${lostFoundBars(r.byCategory)}</div>
+            <div class="card"><h2 style="margin-top: 0">By city</h2>
+              <div class="legend"><span style="--c: var(--lost)">Lost</span><span style="--c: var(--found)">Found</span></div>${lostFoundBars(r.byCity)}</div>
+            <div class="card"><h2 style="margin-top: 0">By month</h2>
+              <div class="legend"><span style="--c: var(--lost)">Lost</span><span style="--c: var(--found)">Found</span></div>${lostFoundBars(r.byMonth.map((m) => ({ ...m, name: formatDay(`${m.month}-01`, { month: 'short', year: 'numeric' }) })))}</div>
+            <div class="card table-wrap"><h2 style="margin-top: 0">Offices</h2>
+              ${r.byOffice.length ? `<table><tr><th>Office</th><th class="num">Found</th><th class="num">Held</th><th class="num">Returned</th></tr>
+                ${r.byOffice.map((o) => `<tr><td>${OFFICE_ICON[o.lfo_type]} ${esc(o.name)}</td><td class="num">${num(o.found)}</td><td class="num">${num(o.held)}</td><td class="num">${num(o.returned)}</td></tr>`).join('')}</table>`
+              : '<p class="muted">No found items in this period.</p>'}</div>
+          </div>
+          <div class="card"><h2 style="margin-top: 0">⚠ Possible fraud</h2>
+            <p class="muted small">People with two or more rejected claims in this area and period.</p>
+            ${r.flagged.length ? `<table><tr><th>Person</th><th>Username</th><th class="num">Rejected claims</th></tr>
+              ${r.flagged.map((f) => `<tr><td>${esc(f.name)}</td><td>@${esc(f.username)}</td><td class="num"><span class="pill warn">${f.rejected}</span></td></tr>`).join('')}</table>`
+            : '<p class="muted">Nobody. 👍</p>'}</div>`;
+      } catch (err) { document.getElementById('error').textContent = err.message; }
+    }
+
+    (async () => {
+      user = await requireUser('office_admin', 'system_admin');
+      document.getElementById('intro').textContent = user.role === 'office_admin'
+        ? `Found items and claims at ${user.officeName}, and lost reports in its province.` : 'Reports, recoveries and claims for any province, city or office.';
+      document.getElementById('from').value = todayInput(-90);
+      document.getElementById('to').value = todayInput();
+      if (user.role === 'office_admin') document.getElementById('area').classList.add('hidden');
+      else {
+        const offices = await api('/api/offices');
+        document.getElementById('office').innerHTML = optionsHtml(offices, null, 'All offices');
+        await cityPicker(document.getElementById('province'), document.getElementById('city'), { placeholderAll: 'All' });
+      }
+      document.getElementById('run').onclick = run;
+      await run();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lost &amp; Found · Claim</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header></header>
+  <main>
+    <p><a href="claims.html">← All claims</a></p>
+    <div id="banner"></div>
+    <div id="page"><div class="card empty">Loading…</div></div>
+  </main>
+
+  <dialog id="decide-dialog">
+    <form id="decide-form" method="dialog">
+      <h2 id="d-title">Decision</h2>
+      <p class="muted" id="d-help"></p>
+      <label for="d-notes" id="d-label">Notes</label>
+      <textarea id="d-notes" maxlength="1000" style="min-height: 80px"></textarea>
+      <p class="error" id="d-error"></p>
+      <div class="actions"><button type="button" class="secondary" id="d-cancel">Cancel</button><button type="submit" id="d-submit">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="return-dialog">
+    <form id="return-form" method="dialog">
+      <h2>Hand the item over</h2>
+      <p class="muted">Check the owner's ID document (ID card, passport or driver's licence) and that the name matches the claim.</p>
+      <label class="inline"><input type="checkbox" id="ret-id"> I checked the owner's ID document</label>
+      <label for="ret-notes">Notes <span class="muted small">(optional)</span></label>
+      <input type="text" id="ret-notes" maxlength="300" placeholder="e.g. ID number checked, collected in person">
+      <p class="error" id="ret-error"></p>
+      <div class="actions"><button type="button" class="secondary" id="ret-cancel">Cancel</button><button type="submit" class="found">Item returned</button></div>
+    </form>
+  </dialog>
+
+  <script src="js/common.js"></script>
+  <script>
+    const id = param('id');
+    let claim; let decision;
+    const FLOW = [['pending', 'Sent'], ['under_review', 'Being checked'], ['approved', 'Approved'], ['returned', 'Collected']];
+
+    function steps(c) {
+      if (['rejected', 'withdrawn'].includes(c.status_code)) return `<div class="steps"><span class="current">${esc(c.status)}</span></div>`;
+      const at = FLOW.findIndex(([k]) => k === c.status_code);
+      return `<div class="steps">${FLOW.map(([, label], n) => `<span class="${n === at ? 'current' : n < at ? 'done' : ''}">${label}</span>`).join('')}</div>`;
+    }
+
+    function render() {
+      const c = claim;
+      const open = ['pending', 'under_review'].includes(c.status_code);
+      const nextStep = {
+        pending: 'The office will check your description against the item.',
+        under_review: 'The office is checking your description against the item.',
+        approved: `Approved! Collect your item at ${c.office_name}. Bring your ID document.`,
+        returned: 'You collected your item. 🎉',
+        rejected: 'The office could not confirm that the item is yours.',
+        withdrawn: 'You withdrew this claim.',
+      }[c.status_code];
+      document.getElementById('page').innerHTML = `
+        <div class="page-head"><div>
+          <div class="row">${claimPill(c.status_code, c.status)} <span class="small muted">Claim #${c.id}</span></div>
+          <h1 style="margin-top: 8px">${esc(c.item_name)}</h1>
+          <p class="muted"><a href="item.html?id=${c.found_item_id}">${esc(c.found_ref)}</a> · ${esc(c.category)} · kept by ${esc(c.office_name)}</p>
+        </div>
+        <div class="row">
+          ${c.isOwn && open ? '<button class="secondary" id="withdraw">Withdraw claim</button>' : ''}
+          ${c.canDecide && c.status_code === 'pending' ? '<button class="secondary" id="review">Start checking</button>' : ''}
+          ${c.canDecide && open ? '<button class="found" id="approve">Approve</button><button class="danger" id="reject">Reject</button>' : ''}
+          ${c.canDecide && c.status_code === 'approved' ? '<button class="found" id="return">Hand item over</button>' : ''}
+        </div></div>
+        ${steps(c)}
+        ${c.isOwn && !c.canDecide ? `<div class="notice" style="margin-top: 14px">${esc(nextStep)}</div>` : ''}
+        <div class="two-col" style="margin-top: 14px">
+          <div class="card">
+            <h2 style="margin-top: 0">${c.canDecide ? "Claimant's description" : 'Your description'}</h2>
+            <p class="description">${esc(c.proof_description)}</p>
+            ${c.lost_ref ? `<p class="small muted">Linked to lost report <a href="item.html?id=${c.lost_item_id}">${esc(c.lost_ref)}</a></p>` : ''}
+          </div>
+          ${c.canDecide ? `<div class="card"><h2 style="margin-top: 0">Secret details of the item</h2>
+            ${c.hidden_details ? `<div class="secret"><span class="description">${esc(c.hidden_details)}</span></div>` : '<p class="muted">No secret details were recorded. Check the item itself and private photos.</p>'}
+            ${!c.received_at ? '<p class="notice" style="margin-top: 12px">The office has not received this item yet. It can only be approved once it is handed in.</p>' : ''}</div>` : ''}
+        </div>
+        <div class="detail-grid">
+          <div>
+            ${c.activity && c.activity.length ? `<div class="card"><h2 style="margin-top: 0">History</h2><ul class="timeline">${c.activity.map((a) => `
+              <li><div class="when">${formatDate(a.created_at)}${a.person ? ` · ${esc(a.person)}` : ''}</div><div><strong>${esc(a.action.replace(/_/g, ' '))}</strong>${a.details ? ` – ${esc(a.details)}` : ''}</div></li>`).join('')}</ul></div>` : ''}
+          </div>
+          <div class="card side"><dl>
+            ${c.canDecide ? `<dt>Claimant</dt><dd>${esc(c.claimant || 'former member')}<br><span class="small">${esc(c.claimant_email || '')} ${esc(c.claimant_phone || '')}</span>
+              ${c.rejected_claims >= 1 ? `<br><span class="pill warn" style="margin-top: 4px">⚠ ${c.rejected_claims} rejected claim${c.rejected_claims === 1 ? '' : 's'}</span>` : ''}</dd>` : ''}
+            <dt>Claimed</dt><dd>${formatDate(c.claim_date)}</dd>
+            ${c.reviewed_at ? `<dt>Decided</dt><dd>${formatDate(c.reviewed_at)}${c.reviewed_by_name ? `<br><span class="small muted">${esc(c.reviewed_by_name)}</span>` : ''}</dd>` : ''}
+            ${c.decision_notes ? `<dt>Notes</dt><dd>${esc(c.decision_notes)}</dd>` : ''}
+            ${c.restitution_date ? `<dt>Handed over</dt><dd>${formatDate(c.restitution_date)}${c.released_by_name ? `<br><span class="small muted">${esc(c.released_by_name)} · ID checked</span>` : ''}</dd>` : ''}
+          </dl></div>
+        </div>`;
+      const on = (elId, fn) => { const el = document.getElementById(elId); if (el) el.onclick = fn; };
+      on('withdraw', () => act(async () => {
+        if (!confirm('Withdraw this claim?')) return;
+        await api(`/api/claims/${c.id}/withdraw`, { method: 'POST' });
+        await reload('Claim withdrawn.');
+      }));
+      on('review', () => act(async () => {
+        await api(`/api/claims/${c.id}/decision`, { method: 'POST', body: { decision: 'review' } });
+        await reload('Marked as being checked.');
+      }));
+      on('approve', () => openDecision('approve'));
+      on('reject', () => openDecision('reject'));
+      on('return', () => { document.getElementById('return-form').reset(); document.getElementById('ret-error').textContent = ''; document.getElementById('return-dialog').showModal(); });
+    }
+
+    function openDecision(d) {
+      decision = d;
+      document.getElementById('decide-form').reset();
+      document.getElementById('d-error').textContent = '';
+      document.getElementById('d-title').textContent = d === 'approve' ? 'Approve the claim' : 'Reject the claim';
+      document.getElementById('d-help').textContent = d === 'approve'
+        ? 'The description matches the secret details. Other open claims on this item will be rejected. The owner then collects the item with their ID.'
+        : 'Explain why; the claimant sees this. Rejected claims are counted, to help spot fraud.';
+      document.getElementById('d-label').textContent = d === 'approve' ? 'Notes (optional)' : 'Reason';
+      document.getElementById('d-notes').required = d === 'reject';
+      document.getElementById('d-submit').className = d === 'approve' ? 'found' : 'danger';
+      document.getElementById('d-submit').textContent = d === 'approve' ? 'Approve' : 'Reject';
+      document.getElementById('decide-dialog').showModal();
+    }
+
+    async function reload(message) {
+      claim = await api(`/api/claims/${id}`);
+      render();
+      if (message) flash(message);
+    }
+    async function act(fn, errorId) {
+      const el = errorId && document.getElementById(errorId);
+      if (el) el.textContent = '';
+      try { await fn(); } catch (err) { if (el) el.textContent = err.message; else alert(err.message); }
+    }
+
+    document.getElementById('d-cancel').onclick = () => document.getElementById('decide-dialog').close();
+    document.getElementById('decide-form').onsubmit = (e) => {
+      e.preventDefault();
+      act(async () => {
+        await api(`/api/claims/${id}/decision`, { method: 'POST', body: { decision, notes: document.getElementById('d-notes').value } });
+        document.getElementById('decide-dialog').close();
+        await reload(decision === 'approve' ? 'Claim approved.' : 'Claim rejected.');
+      }, 'd-error');
+    };
+    document.getElementById('ret-cancel').onclick = () => document.getElementById('return-dialog').close();
+    document.getElementById('return-form').onsubmit = (e) => {
+      e.preventDefault();
+      act(async () => {
+        await api(`/api/claims/${id}/return`, { method: 'POST', body: { idVerified: document.getElementById('ret-id').checked, notes: document.getElementById('ret-notes').value } });
+        document.getElementById('return-dialog').close();
+        await reload('Item handed over to its owner. 🎉');
+      }, 'ret-error');
+    };
+
+    (async () => {
+      await requireUser();
+      try {
+        await reload();
+        if (param('new')) document.getElementById('banner').innerHTML = '<div class="success">Your claim was sent. The office will compare your description with the item and let you know here.</div>';
+      } catch (err) { document.getElementById('page').innerHTML = `<div class="card empty">${esc(err.message)}</div>`; }
+    })();
+  </script>
+</body>
+</html>
